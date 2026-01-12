@@ -2,19 +2,22 @@
 import sys
 import logging
 from pathlib import Path
-import tempfile
 
 from audio_extractor import AudioExtractor
 from speech_recognition_service import SpeechRecognitionService
-from language_detector import LanguageDetector
 from segment_merger import SegmentMerger
 from subtitle_generator import SubtitleGenerator
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# БОЛЬШИЕ МОДЕЛИ (рекомендуется для лучшего качества)
+# Скачать с: https://alphacephei.com/vosk/models
+#MODEL_RU = "models/vosk-model-ru-0.42"  # Большая русская (1.8Gb, WER 12%)
+#MODEL_EN = "models/vosk-model-en-us-0.22"  # Большая английская (1.5Gb, WER 11%)
 
 MODEL_RU = "models/vosk-model-small-ru-0.22"
 MODEL_EN = "models/vosk-model-small-en-us-0.15"
