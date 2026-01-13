@@ -7,11 +7,11 @@ logger = logging.getLogger(__name__)
 
 
 class SubtitleGenerator:
-    """Generates SRT subtitle files."""
+    """Создание SRT файла с субтитрами."""
 
     @staticmethod
     def generate_srt(segments: List[TranscriptionSegment], output_path: Path):
-        """Generate SRT file from segments."""
+
         logger.info(f"Generating SRT: {output_path}")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -30,7 +30,7 @@ class SubtitleGenerator:
 
     @staticmethod
     def _format_time(seconds: float) -> str:
-        """Convert seconds to SRT time format HH:MM:SS,mmm."""
+        """Конвертация секунд в SRT время формата HH:MM:SS,mmm."""
         hours = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
         secs = int(seconds % 60)

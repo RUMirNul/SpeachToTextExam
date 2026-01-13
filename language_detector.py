@@ -1,22 +1,61 @@
 import re
-from typing import Tuple
+from typing import Tuple, Set, Optional
 import logging
+from spellchecker import SpellChecker
 
 logger = logging.getLogger(__name__)
 
 
 class LanguageDetector:
-    """Detects language and assesses recognition quality."""
-    # УСИЛЕННЫЕ ПОРОГИ - чтобы не убивать реальный русский текст
-    MAX_VERY_SHORT_WORDS_RATIO = 0.45  # Максимум 45% слов из 1-2 букв (было 0.5)
-    MIN_AVG_WORD_LENGTH = 3.2  # Минимальная средняя длина (было 3.0)
-    MIN_VERY_LONG_WORDS_RATIO = 0.15  # Минимум 15% слов >= 5 букв
+    """
+    Улучшенное распознавание языка с помощью проверки орфографии и понимания контекста.
+
+    Особенности:
+    1. Распознавание кириллицы/латиницы
+    2. Интеграция проверки орфографии (pyspellchecker)
+    3. Оценка русского языка с учетом контекста
+    4. Частотный анализ слов
+    5. Определение транслитерации с высокой точностью
+    6. Общий словарь русских слов
+    """
+
+    # Quality thresholds
+    MAX_VERY_SHORT_WORDS_RATIO = 0.45
+    MIN_AVG_WORD_LENGTH = 3.2
+    MIN_VERY_LONG_WORDS_RATIO = 0.15
+
+    # Lazy-loaded spell checkers
+    _spell_ru: Optional[SpellChecker] = None
+    _spell_en: Optional[SpellChecker] = None
 
 
+    @classmethod
+    def _get_spell_checker_ru(cls) -> SpellChecker:
+        """Получение или инициализация программы проверки орфографии на русском языке."""
+        if cls._spell_ru is None:
+            logger.info("Инициализация программы проверки...")
+            cls._spell_ru = SpellChecker(language='ru')
+        return cls._spell_ru
+
+    @classmethod
+    def _get_spell_checker_en(cls) -> SpellChecker:
+        """Получение или инициализация программы проверки орфографии на английском языке."""
+        if cls._spell_en is None:
+            logger.info("Инициализация программы проверки...")
+            cls._spell_en = SpellChecker(language='en')
+        return cls._spell_en
 
     @staticmethod
     def detect_language(text: str) -> str:
-        """Detect language based on alphabet (Cyrillic/Latin)."""
+        """
+        Detect language based on alphabet distribution.
+
+        Returns:
+        - 'ru': Russian (Cyrillic > 60%)
+        - 'en': English (Latin > 60%)
+        - 'mixed': Both present (40-60% mix)
+        - 'unknown': No alphabet found
+        """
         cyrillic_count = len(re.findall(r'[а-яёА-ЯЁ]', text))
         latin_count = len(re.findall(r'[a-zA-Z]', text))
 
@@ -33,125 +72,189 @@ class LanguageDetector:
         else:
             return "mixed"
 
-    @staticmethod
-    def assess_quality(text: str) -> float:
-        """Assess recognition quality (0.0 - 1.0)."""
+    @classmethod
+    def assess_quality(cls, text: str) -> float:
+        """
+        Комплексная оценка качества, сочетающая в себе множество факторов.
+
+        Факторы:
+        1. Базовое качество (количество слов, букв, однородность алфавита)
+        2. Штраф за проверку орфографии (слова с ошибками в написании)
+        3. Контекстный бонус (общеупотребительные русские слова, связность)
+
+        return: 0,0-1,0 (выше = лучшее качество)
+        """
         if not text.strip():
             return 0.0
 
+        base_score = cls._calculate_base_score(text)
+        spell_penalty = cls._calculate_spell_penalty(text)
+        context_bonus = cls._calculate_context_bonus(text)
+
+        final_score = (base_score * 0.7 + context_bonus * 0.3) * spell_penalty
+
+        return min(max(final_score, 0.0), 1.0)
+
+    @classmethod
+    def _calculate_base_score(cls, text: str) -> float:
+        """Расчёт основных показателей качества."""
         words = text.split()
         word_count = len(words)
         letter_count = len([c for c in text if c.isalpha()])
 
-        # Word count score (0-1)
         word_score = min(word_count / 10, 1.0) * 0.2
-
-        # Letter count score (0-1)
         letter_score = min(letter_count / 50, 1.0) * 0.2
 
-        # Alphabet homogeneity score
         cyrillic_ratio = len(re.findall(r'[а-яёА-ЯЁ]', text)) / max(letter_count, 1)
         latin_ratio = len(re.findall(r'[a-zA-Z]', text)) / max(letter_count, 1)
         alphabet_score = max(cyrillic_ratio, latin_ratio) * 0.2
 
-        # Text length score
         text_len = len(text)
-        length_score = 0.2
         if 10 < text_len < 200:
             length_score = 0.2
         elif text_len < 5 or text_len > 300:
             length_score = 0.05
+        else:
+            length_score = 0.1
 
-        # Transliteration penalty
-        transliteration_penalty = 1.0 if not LanguageDetector.is_transliteration(text) else 0.3
+        return word_score + letter_score + alphabet_score + length_score + 0.2
 
-        quality = (word_score + letter_score + alphabet_score + length_score + 0.2) * transliteration_penalty
-        return min(quality, 1.0)
+    @classmethod
+    def _calculate_spell_penalty(cls, text: str) -> float:
+        """
+        Расчёт штрафа за проверку орфографии на основе орфографической ошибки.
 
+        Логика:
+        - 0% ошибок - 1,0 (без штрафных санкций)
+        - 10% ошибок - 0,8
+        - 20% ошибок - 0,6
+        - 50% ошибок - 0,0
+                """
+        language = LanguageDetector.detect_language(text)
+
+        if language == "ru":
+            spell_checker = cls._get_spell_checker_ru()
+            words = text.lower().split()
+            misspelled = spell_checker.unknown(words)
+            error_ratio = len(misspelled) / max(len(words), 1)
+
+            penalty = max(1.0 - (error_ratio * 2.5), 0.0)
+
+            logger.debug(
+                f"Проверка RU языка: {len(misspelled)}/{len(words)} "
+                f"опечатка ({error_ratio * 100:.1f}%) → штраф={penalty:.2f}"
+            )
+            return penalty
+
+        elif language == "en":
+            spell_checker = cls._get_spell_checker_en()
+            words = text.lower().split()
+            misspelled = spell_checker.unknown(words)
+            error_ratio = len(misspelled) / max(len(words), 1)
+
+            penalty = max(1.0 - (error_ratio * 2.5), 0.0)
+
+            logger.debug(
+                f"Проверка EN языка: {len(misspelled)}/{len(words)} "
+                f"опечатка ({error_ratio * 100:.1f}%) → штраф={penalty:.2f}"
+            )
+            return penalty
+
+        return 0.8
+
+    @classmethod
+    def _calculate_context_bonus(cls, text: str) -> float:
+        """
+        Расчёт бонуса за согласованность контекста для русского текста.
+
+        Факторы:
+        1. Наличие общеупотребительных русских слов (50%)
+        2. Средняя длина слова (50%)
+        """
+        language = LanguageDetector.detect_language(text)
+
+        if language != "ru":
+            return 0.0
+
+        russian_words = re.findall(r'[а-яёА-ЯЁ]+', text.lower())
+
+        if not russian_words:
+            return 0.0
+
+        common_count = sum(
+            1 for w in russian_words
+            if w in cls.COMMON_SHORT_RUSSIAN_WORDS
+        )
+        common_ratio = common_count / len(russian_words)
+        common_score = min(common_ratio * 2, 1.0)
+
+        avg_length = sum(len(w) for w in russian_words) / len(russian_words)
+        length_score = min(avg_length / 5, 1.0)
+
+        context_score = common_score * 0.5 + length_score * 0.5
+
+        logger.debug(
+            f"Анализ контекста: {common_ratio * 100:.1f}% обычных слов, "
+            f"сред. длина={avg_length:.2f} → оценка контекст={context_score:.2f}"
+        )
+
+        return context_score
 
     @staticmethod
     def is_transliteration(text: str) -> bool:
         """
-        Определяет, является ли текст транслитерацией английской речи.
+        Определяет, переведен ли текст на английский (а не на русский). (Транслит)
 
-        УСИЛЕННАЯ версия - меньше ложных срабатываний на реальном русском.
-
-        Args:
-            text: текст для проверки
-
-        Returns:
-            True если это вероятно транслитерация, False если это реальный русский
+        Возвращает значение True, если это вероятная транслитерация, и False, если это настоящая русская
         """
-        if not text or len(text.strip()) == 0:
-            return False
-
-        # Шаг 1: Выделяем только русские слова
         russian_words = re.findall(r'[а-яА-ЯёЁ]+', text.lower())
 
         if not russian_words:
             return False
 
         total_words = len(russian_words)
-
-        # Шаг 2: Анализируем статистику слов
         word_lengths = [len(word) for word in russian_words]
-        avg_length = sum(word_lengths) / total_words if total_words > 0 else 0
 
-        very_short_words = sum(1 for length in word_lengths if length <= 2)
-        very_short_ratio = very_short_words / total_words if total_words > 0 else 0
+        avg_length = sum(word_lengths) / total_words
+        very_short_ratio = sum(1 for l in word_lengths if l <= 2) / total_words
+        very_long_ratio = sum(1 for l in word_lengths if l >= 5) / total_words
 
-        very_long_words = sum(1 for length in word_lengths if length >= 5)
-        very_long_ratio = very_long_words / total_words if total_words > 0 else 0
-
-        # Шаг 3: Проверяем, есть ли характерные русские слова
         common_russian_count = sum(
             1 for word in russian_words
             if word in LanguageDetector.COMMON_SHORT_RUSSIAN_WORDS
         )
-        common_russian_ratio = common_russian_count / total_words if total_words > 0 else 0
+        common_ratio = common_russian_count / total_words
 
-        # Шаг 4: Применяем УСИЛЕННЫЕ критерии
-        criteria_met = 0
-        criteria_details = []
-
-        # Критерий 1: Слишком много коротких слов (> 45%)
-        if very_short_ratio > LanguageDetector.MAX_VERY_SHORT_WORDS_RATIO:
-            criteria_met += 1
-            criteria_details.append(f"очень_короткие: {very_short_ratio * 100:.1f}%")
-
-        # Критерий 2: Слишком низкая средняя длина (< 3.2)
-        if avg_length < LanguageDetector.MIN_AVG_WORD_LENGTH:
-            criteria_met += 1
-            criteria_details.append(f"средняя_длина: {avg_length:.2f}")
-
-        # Критерий 3: Слишком мало длинных слов (< 15%)
-        if very_long_ratio < LanguageDetector.MIN_VERY_LONG_WORDS_RATIO:
-            criteria_met += 1
-            criteria_details.append(f"длинные: {very_long_ratio * 100:.1f}%")
-
-        # Критерий 4: Много характерных русских слов = НЕ транслитерация!
-        # Если > 40% слов из типичного русского словаря - это реальный русский
-        if common_russian_ratio > 0.4:
+        if common_ratio > 0.4:
             logger.info(
-                f"Много характерных русских слов ({common_russian_ratio * 100:.1f}%) - "
-                f"это реальный русский текст: '{text[:50]}...'"
+                f"Реальный русский язык обнаружен: {common_ratio * 100:.1f}% обычных слов"
             )
             return False
 
-        # УСИЛЕННОЕ правило: требуем 4 критерия вместо 3 или 2
-        # Только если ВСЕ 4 критерия выполнены - это транслитерация
-        is_transliteration = criteria_met >= 2
+        criteria_met = 0
+        details = []
 
-        if is_transliteration or criteria_met >= 2:
-            logger.info(
-                f"Проверка транслитерации: '{text[:50]}...' "
-                f"(критерии: {criteria_met}/4, {', '.join(criteria_details)}, "
-                f"характ. русск: {common_russian_ratio * 100:.1f}%) "
-                f"→ {'ТРАНСЛИТ' if is_transliteration else 'РЕАЛЬНЫЙ'}"
-            )
+        if very_short_ratio > LanguageDetector.MAX_VERY_SHORT_WORDS_RATIO:
+            criteria_met += 1
+            details.append(f"very_short={very_short_ratio * 100:.1f}%")
 
-        return is_transliteration
+        if avg_length < LanguageDetector.MIN_AVG_WORD_LENGTH:
+            criteria_met += 1
+            details.append(f"avg_len={avg_length:.2f}")
 
+        if very_long_ratio < LanguageDetector.MIN_VERY_LONG_WORDS_RATIO:
+            criteria_met += 1
+            details.append(f"long_words={very_long_ratio * 100:.1f}%")
+
+        is_transliteration_result = criteria_met >= 2
+
+        logger.info(
+            f"Проверка на транслит: '{text[:50]}...' "
+            f"({criteria_met}/3 критериев: {', '.join(details)}) "
+            f"→ {'TRANSLITERATION' if is_transliteration_result else 'REAL RUSSIAN'}"
+        )
+
+        return is_transliteration_result
 
     # Типичные короткие русские слова (не признак транслитерации)
     COMMON_SHORT_RUSSIAN_WORDS = {

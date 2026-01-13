@@ -1,0 +1,9 @@
+Надо скачать модели и распаковать эту папку
+
+Маленькие модели:
+https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip
+https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+
+Большие модели:
+https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip
+https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip

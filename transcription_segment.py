@@ -1,5 +1,5 @@
 class TranscriptionSegment:
-    """Stores one segment of recognized speech with timecodes."""
+    """Выделение одного сегмента распознанной речи с помощью временных кодов."""
 
     def __init__(self, start_time: float, end_time: float, text: str):
         self.start_time = start_time

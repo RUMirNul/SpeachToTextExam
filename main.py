@@ -28,14 +28,14 @@ def main():
     if len(sys.argv) > 1:
         input_file = Path(sys.argv[1])
     else:
-        logger.info("No input file specified, using default")
-        input_file = Path("test_video.mp4")
+        logger.info("Не задан файл")
+        raise Exception("Не задан файл")
 
     if not input_file.exists():
-        logger.error(f"File not found: {input_file}")
+        logger.error(f"Файл не найден: {input_file}")
         sys.exit(1)
 
-    logger.info(f"Processing: {input_file}")
+    logger.info(f"Начался процесс с файлом: {input_file}")
 
     # Extract audio
     extractor = AudioExtractor()
@@ -43,35 +43,35 @@ def main():
 
     try:
         # Recognize with both models
-        logger.info("Recognizing with Russian model...")
+        logger.info("Распознавание с моделью Русского языка...")
         service_ru = SpeechRecognitionService(MODEL_RU)
         segments_ru = service_ru.recognize_speech(audio_file)
         service_ru.close()
-        logger.info(f"Russian: {len(segments_ru)} segments")
+        logger.info(f"Русский: {len(segments_ru)} сегмент")
 
-        logger.info("Recognizing with English model...")
+        logger.info("Распознавание с моделью Английского языка...")
         service_en = SpeechRecognitionService(MODEL_EN)
         segments_en = service_en.recognize_speech(audio_file)
         service_en.close()
-        logger.info(f"English: {len(segments_en)} segments")
+        logger.info(f"Английский: {len(segments_en)} сегмент")
 
         # Merge and generate
         merger = SegmentMerger()
         final_segments = merger.merge_segments(segments_ru, segments_en)
-        logger.info(f"Merged: {len(final_segments)} segments")
+        logger.info(f"Объединённые сегменты: {len(final_segments)} segments")
 
         # Output
         output_path = Path("output") / f"{input_file.stem}.srt"
         generator = SubtitleGenerator()
         generator.generate_srt(final_segments, output_path)
 
-        logger.info(f"✓ Subtitles saved to: {output_path}")
+        logger.info(f"✓ Субтитры сохранены в: {output_path}")
 
     finally:
         # Cleanup
         try:
             audio_file.unlink()
-            logger.info("Cleaned up temporary audio file")
+            logger.info("Очистка временных файлов")
         except:
             pass
 

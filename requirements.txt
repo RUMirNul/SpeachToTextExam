@@ -1,0 +1,4 @@
+pyspellchecker
+pydub==0.25.1
+vosk==0.3.45
+numpy>=1.19.0
